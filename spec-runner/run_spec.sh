@@ -181,11 +181,13 @@ STAGNANT_COUNT=0
 MAX_STAGNANT=3
 
 for i in $(seq 1 "$MAX_ITERATIONS"); do
-    echo "--- Iteration $i / $MAX_ITERATIONS ---"
+    ITER_START=$(date +%s)
+    echo "--- Iteration $i / $MAX_ITERATIONS [$(date '+%H:%M:%S')] ---"
 
     # Snapshot file state before iteration (for stall detection)
     BEFORE_HASH=$(cd "$PROJECT_DIR" && find . -name '.git' -prune -o -type f -print0 | sort -z | xargs -0 md5sum 2>/dev/null | md5sum)
 
+    echo "  Starting claude (timeout: ${ITER_TIMEOUT}s, budget: \$5)..."
     OUTPUT=$(timeout "$ITER_TIMEOUT" claude --print \
         --dangerously-skip-permissions \
         --max-budget-usd 5 \
@@ -249,7 +251,9 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
         STAGNANT_COUNT=0
     fi
 
-    echo "--- Iteration $i done, continuing... ---"
+    ITER_END=$(date +%s)
+    ITER_DURATION=$((ITER_END - ITER_START))
+    echo "--- Iteration $i done (${ITER_DURATION}s) [$(date '+%H:%M:%S')] ---"
     echo ""
 done
 
