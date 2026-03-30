@@ -29,7 +29,7 @@ echo "============================================"
 echo ""
 
 # Create project directory if needed
-mkdir -p "$PROJECT_DIR"
+mkdir -p "$PROJECT_DIR" 2>/dev/null || true
 
 # ─────────────────────────────────────────────
 # Phase 1: Interactive test co-design
