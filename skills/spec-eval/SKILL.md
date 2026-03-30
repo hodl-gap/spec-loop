@@ -177,18 +177,43 @@ For each check, determine:
 - Can we derive a **known-good output** from the spec? (if the spec says "input X
   produces output Y", that's a free test case)
 
-Present the test data plan. Ask: "Do you have sample data, API keys, or saved
-responses I can use?"
+Present the test data plan.
 
-**If the user offers API credentials — accept them.** Integration tests with real
-APIs catch issues that fixtures cannot: rate limits, auth failures, data format
-changes, network timeouts. Create BOTH types of tests:
+**If the coverage map includes any `integration` type tests, you MUST explicitly
+ask the user for credentials before proceeding.** Do not create empty `.env` files
+and move on — an integration test that gracefully skips on missing keys is not
+testing anything. List every credential needed and ask the user to provide them now:
+
+> "These integration tests need credentials to actually run:
+> - `DERIBIT_API_KEY` — for fill sync test
+> - `BINANCE_API_KEY` / `BINANCE_API_SECRET` — for fill sync test
+>
+> Can you provide these now? If not, I'll mark those tests as deferred."
+
+The user who approved integration tests in the coverage map expects them to run.
+Creating a `.env` with empty values and letting tests silently skip defeats the
+purpose — the user will discover after Phase 2 that integration coverage was illusory.
+
+**If the user provides credentials**: verify they work (make one test API call)
+before writing tests that depend on them. A bad key discovered on iteration 15 of
+the autonomous loop wastes all prior iterations.
+
+**If the user defers**: mark those tests clearly as `"deferred": true` in the
+manifest. Do not write tests that silently pass when keys are missing — either the
+test runs for real or it's explicitly deferred.
+
+For all other checks, determine:
+- Can we use a **mock/fixture**? (hardcoded input that exercises the check — fastest,
+  most reliable, works offline)
+- Can we derive a **known-good output** from the spec? (if the spec says "input X
+  produces output Y", that's a free test case)
+
+Create BOTH types of tests when applicable:
 - Fixture-based (offline, fast, deterministic) — for core logic
 - API-based (requires network + credentials) — for integration verification
 
 Mark them clearly in the manifest so the autonomous loop can run offline tests
-first and API tests only when credentials are available. The user offering API
-keys is a signal that integration correctness matters to them — don't dismiss it.
+first and API tests only when credentials are available.
 
 **Gate: Do not proceed until the user confirms the test data plan.**
 
