@@ -44,18 +44,28 @@ if [ ! -d "$PROJECT_DIR/tests" ] || [ -z "$(ls -A "$PROJECT_DIR/tests" 2>/dev/nu
     read -r
 
     claude --add-dir "$SPEC_DIR" \
-        "Use /spec-eval on $SPEC_PATH — the project directory is $PROJECT_DIR"
+        --permission-mode acceptEdits \
+        --append-system-prompt "The user has invoked /spec-eval on $SPEC_PATH with project directory $PROJECT_DIR. Start Step 0 (spec sufficiency check) immediately. When tests are saved, tell the user to exit so Phase 2 can start." \
+        "Run /spec-eval on $SPEC_PATH — project directory is $PROJECT_DIR"
 
     # Verify tests were created
     if [ ! -d "$PROJECT_DIR/tests" ] || [ -z "$(ls -A "$PROJECT_DIR/tests" 2>/dev/null)" ]; then
+        echo ""
         echo "ERROR: No tests found in $PROJECT_DIR/tests/"
         echo "Phase 1 must produce test scripts before Phase 2 can run."
+        echo "Re-run this script to try again."
         exit 1
     fi
 
     echo ""
-    echo "Tests saved to $PROJECT_DIR/tests/"
+    echo "============================================"
+    echo "  Phase 1 complete!"
+    echo "  Tests saved to $PROJECT_DIR/tests/"
+    echo "  Starting Phase 2 (autonomous build) in 5 seconds..."
+    echo "  Press Ctrl+C now to abort if tests need changes."
+    echo "============================================"
     echo ""
+    sleep 5
 else
     echo "=== Phase 1: Skipped (tests already exist in $PROJECT_DIR/tests/) ==="
     echo ""

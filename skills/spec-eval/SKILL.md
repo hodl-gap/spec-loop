@@ -141,10 +141,18 @@ For each check, determine:
 - Can we derive a **known-good output** from the spec? (if the spec says "input X
   produces output Y", that's a free test case)
 
-Present the test data plan. Ask: "Do you have sample data I can use, or should I
-generate fixtures?" The user often has existing data files, saved API responses, or
-known-good examples from manual runs — these are more valuable than synthetic
-fixtures because they reflect real-world edge cases.
+Present the test data plan. Ask: "Do you have sample data, API keys, or saved
+responses I can use?"
+
+**If the user offers API credentials — accept them.** Integration tests with real
+APIs catch issues that fixtures cannot: rate limits, auth failures, data format
+changes, network timeouts. Create BOTH types of tests:
+- Fixture-based (offline, fast, deterministic) — for core logic
+- API-based (requires network + credentials) — for integration verification
+
+Mark them clearly in the manifest so the autonomous loop can run offline tests
+first and API tests only when credentials are available. The user offering API
+keys is a signal that integration correctness matters to them — don't dismiss it.
 
 ---
 
@@ -251,8 +259,17 @@ Save a test manifest to `<project>/tests/manifest.json`:
 }
 ```
 
-Tell the user: "Test suite saved to `tests/`. Run `./run_spec.sh <spec.md>` to
-start the autonomous build loop."
+Tell the user clearly:
+
+**"Test suite saved. Please exit this session now (type /exit or press Ctrl+C)
+so the autonomous build loop can start. The build loop runs in fresh CC sessions
+with no human interaction needed — it will iterate until all tests pass."**
+
+This explicit exit prompt matters because you are running inside Phase 1 of
+`run_spec.sh`. When the user exits, the bash script continues to Phase 2
+automatically. If the user doesn't exit, they'll stay in this session and
+start asking you to build things — which defeats the fresh-context-per-iteration
+architecture of Phase 2. Do NOT continue building after tests are saved.
 
 ---
 

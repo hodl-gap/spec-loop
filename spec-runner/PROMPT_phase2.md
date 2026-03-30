@@ -83,3 +83,8 @@ After updating progress, check: are ALL tasks "done"?
 - Don't modify files in `tests/` — those are the approved acceptance criteria.
 - Read the spec carefully. The tests encode the spec's acceptance criteria. If your
   code passes the tests, it satisfies the spec.
+- If `.env` or API credentials exist in the project directory, use real API endpoints.
+  Do not mock APIs that the spec defines with concrete endpoints when credentials
+  are available. Mock data hides integration failures that only surface with real APIs.
+- If the spec names specific API endpoints (URLs, methods, parameters), implement
+  actual HTTP calls to those endpoints — not simulated responses.
