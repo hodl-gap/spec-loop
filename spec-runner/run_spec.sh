@@ -11,6 +11,7 @@ set -euo pipefail
 
 SPEC_PATH="${1:?Usage: ./run_spec.sh path/to/SPEC.md [max_iterations]}"
 MAX_ITERATIONS="${2:-20}"
+ITER_TIMEOUT="${3:-600}"  # Per-iteration timeout in seconds (default: 10 min)
 SPEC_DIR="$(dirname "$(realpath "$SPEC_PATH")")"
 SPEC_NAME="$(basename "$SPEC_PATH" .md)"
 PROJECT_DIR="${SPEC_DIR}/${SPEC_NAME}-project"
@@ -112,28 +113,39 @@ ENVJSON
     echo "    alembic:    $HAS_ALEMBIC"
     echo "    .env keys:  $HAS_DOTENV"
 
-    # Count tests that will be skipped
+    # Check which tests have unmet requirements.
+    # Only defer for INFRASTRUCTURE that can't be auto-installed (postgresql,
+    # docker, etc). Python packages (scipy, requests) are pip-installable —
+    # Phase 2 should install them, not skip the tests.
     if command -v python3 >/dev/null 2>&1; then
         SKIP_INFO=$(python3 -c "
 import json, sys
 manifest = json.load(open('$MANIFEST'))
 env = json.load(open('$ENV_FILE'))
 tests = manifest.get('tests', [])
+
+# These are infrastructure — can't be pip-installed
+INFRA_DEPS = {'postgresql', 'psql', 'docker', 'npm', 'node', 'redis',
+              'kafka', 'mongodb', 'mysql', 'nginx', 'dotenv'}
+
 skipped = []
 for t in tests:
     reqs = t.get('requires', [])
-    missing = [r for r in reqs if not env.get(r, False)]
-    if missing:
-        skipped.append(f\"  {t['file']}: needs {', '.join(missing)}\")
+    # Only check infra deps against env; ignore pip-installable packages
+    infra_missing = [r for r in reqs if r in INFRA_DEPS and not env.get(r, False)]
+    if infra_missing:
+        skipped.append(f\"  {t['file']}: needs {', '.join(infra_missing)}\")
         t['deferred'] = True
-        t['deferred_reason'] = f\"missing: {', '.join(missing)}\"
+        t['deferred_reason'] = f\"missing infra: {', '.join(infra_missing)}\"
+    else:
+        t.pop('deferred', None)
+        t.pop('deferred_reason', None)
 if skipped:
-    print(f'Deferring {len(skipped)} tests (dependencies unavailable):')
+    print(f'Deferring {len(skipped)} tests (infrastructure unavailable):')
     for s in skipped:
         print(s)
 else:
     print('All test dependencies available.')
-# Write back manifest with deferred flags
 json.dump(manifest, open('$MANIFEST', 'w'), indent=2)
 " 2>&1) || SKIP_INFO="(manifest parse skipped)"
         echo ""
@@ -174,13 +186,23 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
     # Snapshot file state before iteration (for stall detection)
     BEFORE_HASH=$(cd "$PROJECT_DIR" && find . -name '.git' -prune -o -type f -print0 | sort -z | xargs -0 md5sum 2>/dev/null | md5sum)
 
-    OUTPUT=$(claude --print \
+    OUTPUT=$(timeout "$ITER_TIMEOUT" claude --print \
         --dangerously-skip-permissions \
         --max-budget-usd 5 \
         --add-dir "$SPEC_DIR" \
         --add-dir "$PROJECT_DIR" \
         -p "$PROMPT" \
-        2>&1 | tee /dev/stderr) || true
+        2>&1 | tee /dev/stderr) || {
+        EXIT_CODE=$?
+        if [ "$EXIT_CODE" -eq 124 ]; then
+            echo ""
+            echo "WARNING: Iteration $i timed out after ${ITER_TIMEOUT}s"
+        else
+            echo ""
+            echo "WARNING: Iteration $i exited with code $EXIT_CODE"
+        fi
+        OUTPUT=""
+    }
 
     # Check for completion
     if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
