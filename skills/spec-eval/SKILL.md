@@ -16,7 +16,8 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, WebSearch, WebFetch
 # Spec Eval
 
 Co-design a test suite for a specification document with the user. The output is
-a set of plain Python test scripts that verify the spec's acceptance criteria.
+a set of plain test scripts (Python for logic/integration, bash for build checks)
+that verify the spec's acceptance criteria.
 
 This skill is one half of a two-phase workflow. Phase 1 (this skill) is interactive:
 you and the user agree on what "done" means. Phase 2 (run_spec.sh) is autonomous:
@@ -78,6 +79,8 @@ adding acceptance criteria to vague steps, defining scope boundaries, or providi
 sample data. Don't skip this — it's cheaper to fix the spec than to debug tests
 that don't test the right thing.
 
+**Gate: Do not proceed until all GAP rows are resolved or the user explicitly defers them.**
+
 ---
 
 ## Step 1: Read the spec
@@ -91,47 +94,80 @@ Summarize your understanding back to the user in 5-10 lines. Ask: "Is this right
 Getting alignment here prevents wasted iteration later — if you misunderstand the
 spec, every test you propose will be wrong.
 
+**Gate: Do not proceed until the user confirms your understanding is correct.**
+
 ---
 
-## Step 2: Identify verifiable outputs per step
+## Step 2: Build coverage map (COVERAGE-FIRST)
 
-For each step in the spec, identify what can be checked with code. This is where
-you translate the spec's prose into concrete checks — and it's the step most likely
-to miss things, because specs describe what the system DOES, not what could go WRONG.
-The user's domain knowledge fills that gap.
+This is the most critical step. The goal is to map EVERY section of the spec to a
+test proposal — or to an explicit "no test" with a reason. Nothing gets silently
+dropped. The user should never discover after Phase 2 that half the spec was ignored.
 
-Look for these check types:
-- **Threshold checks**: numbers that must fall in ranges
-- **Data shape checks**: output files with expected schema (required keys, types)
-- **Existence checks**: files created, API calls made, records inserted
-- **Set operations**: correct items included/excluded
-- **Integration checks**: external API returns expected data for known inputs
+**Why coverage-first, not capability-first:** The old approach asked "what CAN I
+test with code?" and silently skipped everything else. A 400-line spec covering
+backend + frontend + APIs + alerts would produce 6 backend-only tests. Coverage-first
+starts from the spec's structure and forces every section to be accounted for.
 
-Present these as a table so the user can scan quickly and catch gaps:
+### How to build the map
+
+1. **Extract every section/step** from the spec. Use headers, numbered steps, bullet
+   groups — whatever the spec uses to organize its requirements. Each becomes a row.
+
+2. **For each row, classify the test type:**
+
+   | Test Type | When to use | Example |
+   |-----------|------------|---------|
+   | **code** | Logic, math, data shapes, thresholds — plain Python can verify | `assert severity == "danger" when slot_diff > 25` |
+   | **build** | Something must compile/start without errors | `npm run build exits 0`, `docker-compose up exits 0` |
+   | **integration** | Requires live API/DB/network access + credentials | `Deribit API returns option chain for BTC` |
+   | **human** | Visual, UX, subjective — no automated check possible | `"Open browser, verify chart renders correctly"` |
+   | **skip** | User decides not to test (must be explicit, with reason) | `"Nginx config — deployment-specific, tested in staging"` |
+
+3. **For each row, propose a concrete test** — file name, what it checks, any
+   dependencies. For `human` type, write a manual test instruction. For `skip`,
+   document the reason.
+
+4. **Present the full coverage map:**
 
 ```
-| Step | What to verify | Check type | Notes |
-|------|---------------|------------|-------|
-| Step 1 | API response contains expected fields | data shape | need sample response |
-| Step 2 | Classification matches threshold table | threshold | ranges from spec |
-| Step 3 | Output set = source set minus exclusions | set operation | need known test data |
+## Spec Coverage Map
+
+| # | Spec Section | Test Type | Proposed Test | Status |
+|---|---|---|---|---|
+| 1 | 5.1 BS Pricing | code | test_bs_pricing.py — canonical vectors | COVERED |
+| 2 | 5.2 IV Solver | code | test_bs_pricing.py — round-trip accuracy | COVERED |
+| 3 | 3. Deribit API | integration | test_deribit_api.py — requires API key | COVERED (needs .env) |
+| 4 | 9. React Frontend | build | test_frontend_build.sh — npm build exits 0 | COVERED (smoke) |
+| 5 | 9.2 Vol Curve Editor | human | "Open browser, adjust ATM vol slider" | MANUAL |
+| 6 | 12.3 Nginx config | skip | Deployment-specific, tested in staging | NOT COVERED |
+
+### Gap Summary
+- 4 code tests, 1 integration test, 1 build test, 1 manual check, 1 skip
+- Integration tests require: DERIBIT_API_KEY in .env
 ```
 
-Ask: "These are the checks I'd write tests for. Anything missing? Anything not
-worth testing?"
+### Hard gate
 
-The user often adds checks you couldn't derive from the spec — edge cases from
-operational experience, integration quirks they've hit before. They may also cut
-checks that aren't worth the cost. Both inputs are valuable because the user is
-the one who knows which failures actually matter in production.
+**Do NOT proceed to Step 3 until the user explicitly approves the coverage map.**
+
+Ask: "This is every section of the spec and how I propose to test it. Review the
+map — are there sections I missed? Any test types you want changed? Any skips you
+disagree with?"
+
+If the user identifies gaps, update the map and re-present. Only proceed when the
+user confirms coverage is acceptable. This gate prevents the #1 failure mode: the
+user discovers after Phase 2 that entire spec sections were never tested.
 
 ---
 
 ## Step 3: Discuss test data
 
-Tests without inputs are untestable. This step matters because the autonomous loop
-in Phase 2 will run these tests on every iteration — if a test needs live API access
-and the environment doesn't have credentials, the loop stalls on iteration 1.
+Using the **approved coverage map** from Step 2, determine test data needs for each
+row marked code, build, or integration. Tests without inputs are untestable. This
+step matters because the autonomous loop in Phase 2 will run these tests on every
+iteration — if a test needs live API access and the environment doesn't have
+credentials, the loop stalls on iteration 1.
 
 For each check, determine:
 - Can we use a **mock/fixture**? (hardcoded input that exercises the check — fastest,
@@ -154,15 +190,23 @@ Mark them clearly in the manifest so the autonomous loop can run offline tests
 first and API tests only when credentials are available. The user offering API
 keys is a signal that integration correctness matters to them — don't dismiss it.
 
+**Gate: Do not proceed until the user confirms the test data plan.**
+
 ---
 
 ## Step 4: Write test scripts
 
-Write one Python script per step (or per logical group of checks). The reason for
-plain scripts over pytest: an autonomous agent with fresh context on every iteration
-will run these tests. pytest's conventions (fixtures, conftest, magic discovery) add
-interpretation overhead. A plain script with `assert` + `sys.exit` is unambiguous —
-the agent runs it, reads the exit code, knows pass or fail.
+Write one script per step (or per logical group of checks). Match the runner to the
+test type from the coverage map:
+
+- **code / integration** → Python script (`.py`). Exit 0 = pass, non-zero = fail.
+- **build** → Bash script (`.sh`). Exit 0 = pass, non-zero = fail.
+
+The reason for plain scripts over pytest: an autonomous agent with fresh context on
+every iteration will run these tests. pytest's conventions (fixtures, conftest, magic
+discovery) add interpretation overhead. A plain script with `assert` + `sys.exit`
+(Python) or `set -e` (bash) is unambiguous — the agent runs it, reads the exit code,
+knows pass or fail.
 
 Each script should:
 1. Read its input (output file from the project, or mock data)
@@ -170,7 +214,7 @@ Each script should:
 3. Print a PASS/FAIL summary with evidence
 4. Exit 0 on pass, non-zero on fail
 
-**Example — data shape check:**
+**Example — data shape check (Python):**
 ```python
 #!/usr/bin/env python3
 """Test: API response contains required fields."""
@@ -186,7 +230,7 @@ if missing:
 print(f"PASS: all {len(required)} required fields present in {len(data)} records")
 ```
 
-**Example — threshold check:**
+**Example — threshold check (Python):**
 ```python
 #!/usr/bin/env python3
 """Test: Severity classification matches threshold ranges."""
@@ -204,6 +248,15 @@ if failures:
         print(f"  - {f}")
     sys.exit(1)
 print(f"PASS: all {len(results)} items correctly classified")
+```
+
+**Example — build check (Bash):**
+```bash
+#!/usr/bin/env bash
+set -e
+echo "Testing: React frontend builds without errors"
+cd frontend && npm run build > /tmp/build_output.txt 2>&1
+echo "PASS: frontend build succeeded ($(wc -l < /tmp/build_output.txt) lines output)"
 ```
 
 Keep tests simple. No test frameworks, no imports beyond stdlib + whatever the
@@ -237,6 +290,14 @@ or loops 20 times building the wrong thing.
 ## Step 6: Save and summarize
 
 Save all test scripts to `<project>/tests/`.
+
+Save the **coverage map** to `<project>/tests/coverage_map.md` — the approved map
+from Step 2, including `human` and `skip` rows. The manifest tracks what IS tested
+(runnable scripts); the coverage map tracks what EXISTS in the spec (tested + skipped
++ manual). Two artifacts, two purposes. Without the coverage map on disk, the record
+of what was deliberately skipped or deferred to manual testing is lost when Phase 1
+ends.
+
 Save a test manifest to `<project>/tests/manifest.json`:
 
 ```json
@@ -245,14 +306,23 @@ Save a test manifest to `<project>/tests/manifest.json`:
   "tests": [
     {
       "file": "test_step1_data_collection.py",
+      "runner": "python",
       "step": "Step 1",
       "checks": ["websocket connection", "data schema", "publisher filter"],
       "requires_network": true
     },
     {
       "file": "test_step2_anomaly_detection.py",
+      "runner": "python",
       "step": "Step 2",
       "checks": ["slot_diff severity", "price_pct severity", "unknown status"],
+      "requires_network": false
+    },
+    {
+      "file": "test_frontend_build.sh",
+      "runner": "bash",
+      "step": "Step 5",
+      "checks": ["React app builds without errors"],
       "requires_network": false
     }
   ]
@@ -275,6 +345,16 @@ architecture of Phase 2. Do NOT continue building after tests are saved.
 
 ## Anti-Patterns
 
+- **Skipping the coverage map.** The #1 failure mode. If you jump from reading the
+  spec straight to writing tests, you'll only test what's easy to test and silently
+  drop the rest. ALWAYS build and present the coverage map first. The user should
+  never discover after Phase 2 that entire spec sections were ignored.
+
+- **Capability-first thinking.** "What CAN I test with Python?" is the wrong question.
+  "What SHOULD be tested?" is the right one. Start from the spec's structure, not
+  from what's easy to automate. Hard-to-test sections get build tests, smoke tests,
+  or manual instructions — not silent omission.
+
 - **Writing tests before understanding the spec.** If you misunderstand the spec,
   every test is wrong. Summarize your understanding first, get confirmation.
 
@@ -293,3 +373,7 @@ architecture of Phase 2. Do NOT continue building after tests are saved.
 - **Skipping the test data conversation.** Tests that need live API access will fail
   in environments without credentials. Separate network tests from offline tests
   so the autonomous loop can make progress even without API keys.
+
+- **Soft step transitions.** Each step has a gate. Step 0: spec gaps filled. Step 1:
+  user confirms understanding. Step 2: user approves coverage map. Step 3: test data
+  plan agreed. Do NOT skip gates or treat them as suggestions.
