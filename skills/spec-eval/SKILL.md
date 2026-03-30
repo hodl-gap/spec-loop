@@ -79,7 +79,7 @@ adding acceptance criteria to vague steps, defining scope boundaries, or providi
 sample data. Don't skip this — it's cheaper to fix the spec than to debug tests
 that don't test the right thing.
 
-**Gate: Do not proceed until all GAP rows are resolved or the user explicitly defers them.**
+**Gate:** Unresolved gaps compound downstream — a vague acceptance criterion produces a vague test, which lets the autonomous builder loop 20 times without converging. Resolve all GAP rows with the user (or get explicit deferral) before moving on.
 
 ---
 
@@ -94,7 +94,7 @@ Summarize your understanding back to the user in 5-10 lines. Ask: "Is this right
 Getting alignment here prevents wasted iteration later — if you misunderstand the
 spec, every test you propose will be wrong.
 
-**Gate: Do not proceed until the user confirms your understanding is correct.**
+**Gate:** If you misunderstand the spec, every test you propose will be wrong — and the user won't catch it until Phase 2 builds the wrong thing. Wait for the user to confirm before moving on.
 
 ---
 
@@ -147,17 +147,19 @@ starts from the spec's structure and forces every section to be accounted for.
 - Integration tests require: DERIBIT_API_KEY in .env
 ```
 
-### Hard gate
+### Gate
 
-**Do NOT proceed to Step 3 until the user explicitly approves the coverage map.**
+The coverage map is the contract between you and the user about what gets tested.
+If the user doesn't see and approve it, they'll discover after Phase 2 that entire
+spec sections were never tested — this was the #1 failure mode before this step
+existed.
 
 Ask: "This is every section of the spec and how I propose to test it. Review the
 map — are there sections I missed? Any test types you want changed? Any skips you
 disagree with?"
 
 If the user identifies gaps, update the map and re-present. Only proceed when the
-user confirms coverage is acceptable. This gate prevents the #1 failure mode: the
-user discovers after Phase 2 that entire spec sections were never tested.
+user confirms coverage is acceptable.
 
 ---
 
@@ -179,10 +181,11 @@ For each check, determine:
 
 Present the test data plan.
 
-**If the coverage map includes any `integration` type tests, you MUST explicitly
-ask the user for credentials before proceeding.** Do not create empty `.env` files
-and move on — an integration test that gracefully skips on missing keys is not
-testing anything. List every credential needed and ask the user to provide them now:
+If the coverage map includes any `integration` type tests, the user who approved
+those rows expects them to actually run. An integration test that gracefully skips
+on missing keys isn't testing anything — it's illusory coverage the user will only
+discover after Phase 2. List every credential needed and ask the user to provide
+them now:
 
 > "These integration tests need credentials to actually run:
 > - `DERIBIT_API_KEY` — for fill sync test
@@ -190,17 +193,13 @@ testing anything. List every credential needed and ask the user to provide them 
 >
 > Can you provide these now? If not, I'll mark those tests as deferred."
 
-The user who approved integration tests in the coverage map expects them to run.
-Creating a `.env` with empty values and letting tests silently skip defeats the
-purpose — the user will discover after Phase 2 that integration coverage was illusory.
-
 **If the user provides credentials**: verify they work (make one test API call)
 before writing tests that depend on them. A bad key discovered on iteration 15 of
 the autonomous loop wastes all prior iterations.
 
 **If the user defers**: mark those tests clearly as `"deferred": true` in the
-manifest. Do not write tests that silently pass when keys are missing — either the
-test runs for real or it's explicitly deferred.
+manifest. Tests that silently pass when keys are missing look like coverage but
+aren't — either the test runs for real or it's explicitly deferred.
 
 For all other checks, determine:
 - Can we use a **mock/fixture**? (hardcoded input that exercises the check — fastest,
@@ -215,7 +214,7 @@ Create BOTH types of tests when applicable:
 Mark them clearly in the manifest so the autonomous loop can run offline tests
 first and API tests only when credentials are available.
 
-**Gate: Do not proceed until the user confirms the test data plan.**
+**Gate:** The test data plan determines whether tests exercise real behavior or just check structure. Wait for the user to confirm before writing scripts.
 
 ---
 
@@ -364,16 +363,18 @@ This explicit exit prompt matters because you are running inside Phase 1 of
 `run_spec.sh`. When the user exits, the bash script continues to Phase 2
 automatically. If the user doesn't exit, they'll stay in this session and
 start asking you to build things — which defeats the fresh-context-per-iteration
-architecture of Phase 2. Do NOT continue building after tests are saved.
+architecture of Phase 2. Once tests are saved, your job is done — resist the
+temptation to start building, even if the user asks. Building in this session
+means the autonomous loop loses its fresh-context advantage.
 
 ---
 
 ## Anti-Patterns
 
-- **Skipping the coverage map.** The #1 failure mode. If you jump from reading the
-  spec straight to writing tests, you'll only test what's easy to test and silently
-  drop the rest. ALWAYS build and present the coverage map first. The user should
-  never discover after Phase 2 that entire spec sections were ignored.
+- **Skipping the coverage map.** The #1 failure mode. Jumping from reading the spec
+  straight to writing tests means you'll only test what's easy and silently drop the
+  rest. The coverage map exists so the user sees every section accounted for — tested,
+  deferred, or manually checked — before any code is written.
 
 - **Capability-first thinking.** "What CAN I test with Python?" is the wrong question.
   "What SHOULD be tested?" is the right one. Start from the spec's structure, not
@@ -399,6 +400,7 @@ architecture of Phase 2. Do NOT continue building after tests are saved.
   in environments without credentials. Separate network tests from offline tests
   so the autonomous loop can make progress even without API keys.
 
-- **Soft step transitions.** Each step has a gate. Step 0: spec gaps filled. Step 1:
-  user confirms understanding. Step 2: user approves coverage map. Step 3: test data
-  plan agreed. Do NOT skip gates or treat them as suggestions.
+- **Soft step transitions.** Each step has a gate because skipping ahead compounds
+  errors: a misunderstood spec (Step 1) produces wrong coverage (Step 2) produces
+  wrong tests (Step 4) produces a wrong build (Phase 2). The gates exist to catch
+  misalignment early when it's cheap to fix.
