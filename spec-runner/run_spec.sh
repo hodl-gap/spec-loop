@@ -13,7 +13,7 @@ SPEC_PATH="${1:?Usage: ./run_spec.sh path/to/SPEC.md [max_iterations]}"
 MAX_ITERATIONS="${2:-20}"
 SPEC_DIR="$(dirname "$(realpath "$SPEC_PATH")")"
 SPEC_NAME="$(basename "$SPEC_PATH" .md)"
-PROJECT_DIR="${SPEC_DIR}/${SPEC_NAME}"
+PROJECT_DIR="${SPEC_DIR}/${SPEC_NAME}-project"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROMPT_TEMPLATE="${SCRIPT_DIR}/PROMPT_phase2.md"
 
