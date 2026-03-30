@@ -163,58 +163,35 @@ user confirms coverage is acceptable.
 
 ---
 
-## Step 3: Discuss test data
+## Step 3: Discuss test data and dependencies
 
-Using the **approved coverage map** from Step 2, determine test data needs for each
-row marked code, build, or integration. Tests without inputs are untestable. This
-step matters because the autonomous loop in Phase 2 will run these tests on every
-iteration — if a test needs live API access and the environment doesn't have
-credentials, the loop stalls on iteration 1.
+Using the **approved coverage map** from Step 2, determine two things per test:
+what data it needs, and what infrastructure it depends on.
+
+### Test data
 
 For each check, determine:
-- Can we use a **mock/fixture**? (hardcoded input that exercises the check — fastest,
-  most reliable, works offline)
-- Do we need **real API access**? (the check is meaningless without live data — mark
-  these clearly so the loop can skip them when offline)
-- Can we derive a **known-good output** from the spec? (if the spec says "input X
-  produces output Y", that's a free test case)
+- Can we use a **mock/fixture**? (hardcoded input — fastest, most reliable, offline)
+- Do we need **real API access**? (mark these clearly)
+- Can we derive a **known-good output** from the spec's formulas?
 
-Present the test data plan.
+Create both fixture-based (offline) and API-based (integration) tests when applicable.
 
-If the coverage map includes any `integration` type tests, the user who approved
-those rows expects them to actually run. An integration test that gracefully skips
-on missing keys isn't testing anything — it's illusory coverage the user will only
-discover after Phase 2. List every credential needed and ask the user to provide
-them now:
+### Dependencies
 
-> "These integration tests need credentials to actually run:
-> - `DERIBIT_API_KEY` — for fill sync test
-> - `BINANCE_API_KEY` / `BINANCE_API_SECRET` — for fill sync test
->
-> Can you provide these now? If not, I'll mark those tests as deferred."
+For each `integration` and `build` test, declare a `requires` field in the manifest
+listing what the test needs to run (e.g., `"requires": ["postgresql", "npm"]`). The
+runner probes the environment before Phase 2 starts and auto-defers tests whose
+dependencies aren't available — so the loop makes progress on everything else instead
+of blocking.
 
-**If the user provides credentials**: verify they work (make one test API call)
-before writing tests that depend on them. A bad key discovered on iteration 15 of
-the autonomous loop wastes all prior iterations.
+If the user has credentials or infrastructure available now, verify they work (one
+test call) before writing tests that depend on them. If not, the runner handles it.
 
-**If the user defers**: mark those tests clearly as `"deferred": true` in the
-manifest. Tests that silently pass when keys are missing look like coverage but
-aren't — either the test runs for real or it's explicitly deferred.
+Present the test data plan. Ask the user to confirm before writing scripts.
 
-For all other checks, determine:
-- Can we use a **mock/fixture**? (hardcoded input that exercises the check — fastest,
-  most reliable, works offline)
-- Can we derive a **known-good output** from the spec? (if the spec says "input X
-  produces output Y", that's a free test case)
-
-Create BOTH types of tests when applicable:
-- Fixture-based (offline, fast, deterministic) — for core logic
-- API-based (requires network + credentials) — for integration verification
-
-Mark them clearly in the manifest so the autonomous loop can run offline tests
-first and API tests only when credentials are available.
-
-**Gate:** The test data plan determines whether tests exercise real behavior or just check structure. Wait for the user to confirm before writing scripts.
+**Gate:** The test data plan determines whether tests exercise real behavior or just
+check structure. Wait for the user to confirm before writing scripts.
 
 ---
 
@@ -333,21 +310,28 @@ Save a test manifest to `<project>/tests/manifest.json`:
       "runner": "python",
       "step": "Step 1",
       "checks": ["websocket connection", "data schema", "publisher filter"],
-      "requires_network": true
+      "requires": ["dotenv"]
     },
     {
       "file": "test_step2_anomaly_detection.py",
       "runner": "python",
       "step": "Step 2",
       "checks": ["slot_diff severity", "price_pct severity", "unknown status"],
-      "requires_network": false
+      "requires": []
     },
     {
       "file": "test_frontend_build.sh",
       "runner": "bash",
       "step": "Step 5",
       "checks": ["React app builds without errors"],
-      "requires_network": false
+      "requires": ["npm"]
+    },
+    {
+      "file": "test_db_schema.sh",
+      "runner": "bash",
+      "step": "Step 6",
+      "checks": ["Alembic migrations run, all tables exist"],
+      "requires": ["postgresql", "alembic"]
     }
   ]
 }

@@ -72,6 +72,80 @@ else
 fi
 
 # ─────────────────────────────────────────────
+# Phase 1.5: Environment probe
+# ─────────────────────────────────────────────
+# Read manifest.json, check which dependencies are available,
+# write env_available.json so Phase 2 knows what to skip.
+
+MANIFEST="$PROJECT_DIR/tests/manifest.json"
+ENV_FILE="$PROJECT_DIR/env_available.json"
+
+if [ -f "$MANIFEST" ]; then
+    echo "=== Phase 1.5: Environment probe ==="
+
+    # Probe common dependencies
+    HAS_PSQL=$(which psql >/dev/null 2>&1 && echo true || echo false)
+    HAS_DOCKER=$(which docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && echo true || echo false)
+    HAS_NPM=$(which npm >/dev/null 2>&1 && echo true || echo false)
+    HAS_NODE=$(which node >/dev/null 2>&1 && echo true || echo false)
+    HAS_PYTHON=$(which python3 >/dev/null 2>&1 && echo true || echo false)
+    HAS_ALEMBIC=$(which alembic >/dev/null 2>&1 || python3 -c "import alembic" 2>/dev/null && echo true || echo false)
+    HAS_DOTENV=$( [ -f "$PROJECT_DIR/.env" ] && grep -qv '=$' "$PROJECT_DIR/.env" 2>/dev/null && echo true || echo false)
+
+    cat > "$ENV_FILE" <<ENVJSON
+{
+  "postgresql": $HAS_PSQL,
+  "docker": $HAS_DOCKER,
+  "npm": $HAS_NPM,
+  "node": $HAS_NODE,
+  "python3": $HAS_PYTHON,
+  "alembic": $HAS_ALEMBIC,
+  "dotenv": $HAS_DOTENV
+}
+ENVJSON
+
+    echo "  Environment:"
+    echo "    postgresql: $HAS_PSQL"
+    echo "    docker:     $HAS_DOCKER"
+    echo "    npm:        $HAS_NPM"
+    echo "    node:       $HAS_NODE"
+    echo "    alembic:    $HAS_ALEMBIC"
+    echo "    .env keys:  $HAS_DOTENV"
+
+    # Count tests that will be skipped
+    if command -v python3 >/dev/null 2>&1; then
+        SKIP_INFO=$(python3 -c "
+import json, sys
+manifest = json.load(open('$MANIFEST'))
+env = json.load(open('$ENV_FILE'))
+tests = manifest.get('tests', [])
+skipped = []
+for t in tests:
+    reqs = t.get('requires', [])
+    missing = [r for r in reqs if not env.get(r, False)]
+    if missing:
+        skipped.append(f\"  {t['file']}: needs {', '.join(missing)}\")
+        t['deferred'] = True
+        t['deferred_reason'] = f\"missing: {', '.join(missing)}\"
+if skipped:
+    print(f'Deferring {len(skipped)} tests (dependencies unavailable):')
+    for s in skipped:
+        print(s)
+else:
+    print('All test dependencies available.')
+# Write back manifest with deferred flags
+json.dump(manifest, open('$MANIFEST', 'w'), indent=2)
+" 2>&1) || SKIP_INFO="(manifest parse skipped)"
+        echo ""
+        echo "  $SKIP_INFO"
+    fi
+    echo ""
+else
+    echo "=== Phase 1.5: Skipped (no manifest.json) ==="
+    echo ""
+fi
+
+# ─────────────────────────────────────────────
 # Phase 2: Autonomous build loop
 # ─────────────────────────────────────────────
 

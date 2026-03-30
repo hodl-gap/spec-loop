@@ -13,8 +13,12 @@ work that prior iterations already completed, or miss context about what failed.
    what prior iterations did, what passed, what failed, and what's blocked.
 2. **Task list**: Read `{{PROJECT_DIR}}/tasks.json` — current status of each task.
 3. **Tests**: Read files in `{{PROJECT_DIR}}/tests/` — the acceptance criteria.
-4. **Spec**: Read `{{SPEC_PATH}}` — the full specification (reference as needed).
-5. **Existing code**: Scan `{{PROJECT_DIR}}/src/` or other code directories.
+4. **Manifest**: Read `{{PROJECT_DIR}}/tests/manifest.json` — test metadata including
+   which tests are `"deferred": true` (dependencies unavailable in this environment).
+5. **Environment**: If `{{PROJECT_DIR}}/env_available.json` exists, read it — this
+   tells you what infrastructure is available (postgresql, docker, npm, etc.).
+6. **Spec**: Read `{{SPEC_PATH}}` — the full specification (reference as needed).
+7. **Existing code**: Scan `{{PROJECT_DIR}}/src/` or other code directories.
 
 ## What to do
 
@@ -67,19 +71,22 @@ Update the status field of the task you worked on:
 
 ## Completion check
 
-After updating progress, check: are ALL tasks "done"?
-- Read tasks.json
-- Run ALL tests: `for f in {{PROJECT_DIR}}/tests/test_*.py; do python "$f"; done`
-- If all pass: output `<promise>COMPLETE</promise>`
-- If any fail or any tasks not done: just exit normally (the loop will start a
-  new iteration with fresh context)
+After updating progress, check: are all **non-deferred** tasks "done"?
+- Read tasks.json and manifest.json
+- Skip tests marked `"deferred": true` in the manifest — their dependencies aren't
+  available in this environment. Don't try to install missing infrastructure.
+- Run all non-deferred tests
+- If all non-deferred tests pass: output `<promise>COMPLETE</promise>`
+- If any non-deferred test fails or any non-deferred task not done: just exit
+  normally (the loop will start a new iteration with fresh context)
 
 ## Rules
 
 - One task per iteration. Don't try to do everything at once.
 - If a task depends on another that isn't done yet, skip it and pick a different one.
-- If all remaining tasks are blocked, output `<promise>BLOCKED</promise>` with a
-  summary of what's stuck.
+- If all remaining **non-deferred** tasks are blocked, output `<promise>BLOCKED</promise>`
+  with a summary of what's stuck. Deferred tasks don't count — they were excluded
+  before the loop started because their dependencies aren't available.
 - Don't modify files in `tests/` — those are the approved acceptance criteria.
 - Read the spec carefully. The tests encode the spec's acceptance criteria. If your
   code passes the tests, it satisfies the spec.
