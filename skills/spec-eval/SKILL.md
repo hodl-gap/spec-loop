@@ -39,7 +39,7 @@ Before proposing any tests, assess whether the spec is complete enough to genera
 verifiable tests. A vague spec produces vague tests, and vague tests let Phase 2
 loop 20 times building the wrong thing. Better to surface gaps now.
 
-Check for these 5 elements (derived from GSD, BMAD, Kiro, Spec Kit, and OpenSpec
+Check for these 6 elements (derived from GSD, BMAD, Kiro, Spec Kit, and OpenSpec
 conventions — see `references/spec_checklist.md` for details):
 
 1. **What/why separated from how**: Does the spec describe desired outcomes, or does
@@ -62,6 +62,11 @@ conventions — see `references/spec_checklist.md` for details):
 5. **No circular dependencies**: Can the steps be ordered linearly? Steps that
    depend on each other create loops the autonomous builder can't resolve.
 
+6. **Clear deliverable**: What does the user get when the build is done? A web app
+   they open in a browser? A CLI they run? A data pipeline that produces files? If
+   the spec doesn't say, the builder will produce code that passes tests but leave
+   the user staring at a directory with no idea how to use it.
+
 Present your assessment as a table:
 
 ```
@@ -72,6 +77,7 @@ Present your assessment as a table:
 | Scope boundaries | GAP | No "out of scope" section |
 | I/O examples | OK | Threshold table in Step 2 serves as examples |
 | Dependencies | OK | Steps are sequential |
+| Deliverable | GAP | Spec doesn't say how the user runs/accesses the result |
 ```
 
 If gaps exist, work with the user to fill them before proceeding. This might mean
@@ -304,6 +310,12 @@ Save a test manifest to `<project>/tests/manifest.json`:
 ```json
 {
   "spec": "SYMBOL_CHECKER_WORKFLOW.md",
+  "deliverable": {
+    "type": "web_app",
+    "command": "cd src && python -m uvicorn main:app --port 8000",
+    "verify": "curl -s http://localhost:8000/health returns 200",
+    "user_facing": "Open http://localhost:8000 in your browser"
+  },
   "tests": [
     {
       "file": "test_step1_data_collection.py",

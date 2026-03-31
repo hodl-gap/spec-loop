@@ -278,6 +278,23 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
         echo "  COMPLETE — all tests pass"
         echo "  Iterations used: $i / $MAX_ITERATIONS"
         echo "  Project: $PROJECT_DIR"
+
+        # Print deliverable instructions from manifest
+        if [ -f "$MANIFEST" ] && command -v python3 >/dev/null 2>&1; then
+            python3 -c "
+import json, sys
+m = json.load(open('$MANIFEST'))
+d = m.get('deliverable')
+if d:
+    print()
+    print('  How to use:')
+    if d.get('command'):
+        print(f'    \$ cd $PROJECT_DIR && {d[\"command\"]}')
+    if d.get('user_facing'):
+        print(f'    → {d[\"user_facing\"]}')
+" 2>/dev/null || true
+        fi
+
         echo "============================================"
         exit 0
     fi
