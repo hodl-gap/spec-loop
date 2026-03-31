@@ -21,16 +21,74 @@ PROMPT_TEMPLATE="${SCRIPT_DIR}/PROMPT_phase2.md"
 # Resolve spec path to absolute
 SPEC_PATH="$(realpath "$SPEC_PATH")"
 
+# Run log: one JSON line per iteration, always written locally
+RUN_ID="$(date +%Y%m%d_%H%M%S)_$$"
+RUN_LOG="$PROJECT_DIR/run_log.jsonl"
+
 echo "============================================"
 echo "  Spec Runner"
 echo "  Spec:       $SPEC_PATH"
 echo "  Project:    $PROJECT_DIR"
 echo "  Max iters:  $MAX_ITERATIONS"
+echo "  Run ID:     $RUN_ID"
+echo "  Log:        $RUN_LOG"
 echo "============================================"
 echo ""
 
 # Create project directory if needed
 mkdir -p "$PROJECT_DIR" 2>/dev/null || true
+
+# ─────────────────────────────────────────────
+# Logging helpers
+# ─────────────────────────────────────────────
+
+log_event() {
+    # Appends a JSON line to run_log.jsonl
+    # Usage: log_event '{"iteration": 1, "status": "done", ...}'
+    echo "$1" >> "$RUN_LOG"
+}
+
+upload_to_braintrust() {
+    # Uploads run_log.jsonl to Braintrust project logs if API key is set
+    if [ -z "${BRAINTRUST_API_KEY:-}" ]; then
+        return
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "  (skipping Braintrust upload: python3 not found)"
+        return
+    fi
+    echo "  Uploading run log to Braintrust..."
+    python3 -c "
+import json, os, sys
+try:
+    import braintrust
+except ImportError:
+    print('  (skipping: pip install braintrust to enable uploads)')
+    sys.exit(0)
+
+logger = braintrust.init_logger(project='spec-runner')
+log_path = '$RUN_LOG'
+with open(log_path) as f:
+    events = [json.loads(line) for line in f if line.strip()]
+
+for event in events:
+    logger.log(
+        input={'spec': event.get('spec', ''), 'iteration': event.get('iteration', 0)},
+        output={'status': event.get('status', ''), 'files_changed': event.get('files_changed', False)},
+        metadata={
+            'run_id': '$RUN_ID',
+            'project_dir': '$PROJECT_DIR',
+            'duration_s': event.get('duration_s', 0),
+            'exit_reason': event.get('exit_reason', ''),
+            'iteration': event.get('iteration', 0),
+            'phase': event.get('phase', 'build'),
+        },
+        tags=['spec-runner', event.get('status', 'unknown')],
+    )
+logger.flush()
+print(f'  Uploaded {len(events)} events to Braintrust (project: spec-runner)')
+" 2>&1 || echo "  (Braintrust upload failed, local log preserved)"
+}
 
 # ─────────────────────────────────────────────
 # Phase 1: Interactive test co-design
@@ -165,6 +223,9 @@ echo "=== Phase 2: Autonomous build loop ==="
 echo "Starting up to $MAX_ITERATIONS iterations with fresh context each."
 echo ""
 
+RUN_START=$(date +%s)
+log_event "{\"run_id\": \"$RUN_ID\", \"phase\": \"start\", \"spec\": \"$SPEC_PATH\", \"project\": \"$PROJECT_DIR\", \"max_iterations\": $MAX_ITERATIONS, \"timestamp\": \"$(date -Iseconds)\"}"
+
 # Initialize git if not already a repo (for rollback safety)
 if [ ! -d "$PROJECT_DIR/.git" ]; then
     (cd "$PROJECT_DIR" && git init -q && git add -A && git commit -q -m "Initial: tests from Phase 1" 2>/dev/null) || true
@@ -209,6 +270,9 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
     # Check for completion
     if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
         (cd "$PROJECT_DIR" && git add -A && git commit -q -m "Iteration $i: COMPLETE — all tests pass" 2>/dev/null) || true
+        TOTAL_DURATION=$(( $(date +%s) - RUN_START ))
+        log_event "{\"run_id\": \"$RUN_ID\", \"phase\": \"build\", \"iteration\": $i, \"status\": \"complete\", \"duration_s\": $ITER_DURATION, \"total_duration_s\": $TOTAL_DURATION, \"spec\": \"$SPEC_PATH\", \"timestamp\": \"$(date -Iseconds)\"}"
+        upload_to_braintrust
         echo ""
         echo "============================================"
         echo "  COMPLETE — all tests pass"
@@ -221,6 +285,9 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
     # Check for blocked
     if echo "$OUTPUT" | grep -q "<promise>BLOCKED</promise>"; then
         (cd "$PROJECT_DIR" && git add -A && git commit -q -m "Iteration $i: BLOCKED" 2>/dev/null) || true
+        TOTAL_DURATION=$(( $(date +%s) - RUN_START ))
+        log_event "{\"run_id\": \"$RUN_ID\", \"phase\": \"build\", \"iteration\": $i, \"status\": \"blocked\", \"duration_s\": $ITER_DURATION, \"total_duration_s\": $TOTAL_DURATION, \"spec\": \"$SPEC_PATH\", \"timestamp\": \"$(date -Iseconds)\"}"
+        upload_to_braintrust
         echo ""
         echo "============================================"
         echo "  BLOCKED — agent cannot proceed"
@@ -240,6 +307,10 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
         echo "WARNING: No file changes detected ($STAGNANT_COUNT/$MAX_STAGNANT stagnant)"
         if [ "$STAGNANT_COUNT" -ge "$MAX_STAGNANT" ]; then
             echo ""
+            TOTAL_DURATION=$(( $(date +%s) - RUN_START ))
+            log_event "{\"run_id\": \"$RUN_ID\", \"phase\": \"build\", \"iteration\": $i, \"status\": \"stalled\", \"duration_s\": $ITER_DURATION, \"total_duration_s\": $TOTAL_DURATION, \"spec\": \"$SPEC_PATH\", \"timestamp\": \"$(date -Iseconds)\"}"
+            upload_to_braintrust
+            echo ""
             echo "============================================"
             echo "  STALLED — $MAX_STAGNANT iterations with no changes"
             echo "  Check $PROJECT_DIR/progress.txt for details"
@@ -253,10 +324,15 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
 
     ITER_END=$(date +%s)
     ITER_DURATION=$((ITER_END - ITER_START))
+    FILES_CHANGED=$( [ "$BEFORE_HASH" != "$AFTER_HASH" ] && echo true || echo false )
+    log_event "{\"run_id\": \"$RUN_ID\", \"phase\": \"build\", \"iteration\": $i, \"status\": \"continue\", \"duration_s\": $ITER_DURATION, \"files_changed\": $FILES_CHANGED, \"spec\": \"$SPEC_PATH\", \"timestamp\": \"$(date -Iseconds)\"}"
     echo "--- Iteration $i done (${ITER_DURATION}s) [$(date '+%H:%M:%S')] ---"
     echo ""
 done
 
+TOTAL_DURATION=$(( $(date +%s) - RUN_START ))
+log_event "{\"run_id\": \"$RUN_ID\", \"phase\": \"build\", \"iteration\": $MAX_ITERATIONS, \"status\": \"max_iterations\", \"total_duration_s\": $TOTAL_DURATION, \"spec\": \"$SPEC_PATH\", \"timestamp\": \"$(date -Iseconds)\"}"
+upload_to_braintrust
 echo ""
 echo "============================================"
 echo "  MAX ITERATIONS reached ($MAX_ITERATIONS)"
