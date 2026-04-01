@@ -267,6 +267,9 @@ for i in $(seq 1 "$MAX_ITERATIONS"); do
         OUTPUT=""
     }
 
+    # Calculate iteration duration (needed by all exit paths below)
+    ITER_DURATION=$(( $(date +%s) - ITER_START ))
+
     # Check for completion
     if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
         (cd "$PROJECT_DIR" && git add -A && git commit -q -m "Iteration $i: COMPLETE — all tests pass" 2>/dev/null) || true
@@ -339,8 +342,6 @@ if d:
         STAGNANT_COUNT=0
     fi
 
-    ITER_END=$(date +%s)
-    ITER_DURATION=$((ITER_END - ITER_START))
     FILES_CHANGED=$( [ "$BEFORE_HASH" != "$AFTER_HASH" ] && echo true || echo false )
     log_event "{\"run_id\": \"$RUN_ID\", \"phase\": \"build\", \"iteration\": $i, \"status\": \"continue\", \"duration_s\": $ITER_DURATION, \"files_changed\": $FILES_CHANGED, \"spec\": \"$SPEC_PATH\", \"timestamp\": \"$(date -Iseconds)\"}"
     echo "--- Iteration $i done (${ITER_DURATION}s) [$(date '+%H:%M:%S')] ---"
