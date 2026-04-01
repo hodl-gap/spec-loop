@@ -208,6 +208,29 @@ json.dump(manifest, open('$MANIFEST', 'w'), indent=2)
 " 2>&1) || SKIP_INFO="(manifest parse skipped)"
         echo ""
         echo "  $SKIP_INFO"
+
+        # Print install hints for missing infrastructure
+        MISSING_HINTS=""
+        if [ "$HAS_PSQL" = "false" ]; then
+            MISSING_HINTS="${MISSING_HINTS}\n    postgresql:  sudo apt install postgresql postgresql-client  (or: brew install postgresql)"
+        fi
+        if [ "$HAS_DOCKER" = "false" ]; then
+            MISSING_HINTS="${MISSING_HINTS}\n    docker:      curl -fsSL https://get.docker.com | sh  (or: sudo apt install docker.io)"
+        fi
+        if [ "$HAS_NPM" = "false" ]; then
+            MISSING_HINTS="${MISSING_HINTS}\n    npm/node:    curl -fsSL https://fnm.vercel.app/install | bash && fnm install --lts"
+        fi
+        if [ "$HAS_DOTENV" = "false" ] && [ -f "$PROJECT_DIR/.env" ]; then
+            MISSING_HINTS="${MISSING_HINTS}\n    .env keys:   Fill in empty values in $PROJECT_DIR/.env"
+        fi
+        if [ -n "$MISSING_HINTS" ]; then
+            echo ""
+            echo "  To unblock deferred tests, install missing dependencies:"
+            echo -e "$MISSING_HINTS"
+            echo ""
+            echo "  Install now and re-run, or press Enter to continue with deferred tests skipped."
+            read -r
+        fi
     fi
     echo ""
 else
