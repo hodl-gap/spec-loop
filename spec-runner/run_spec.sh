@@ -205,6 +205,9 @@ if skipped:
 else:
     print('All test dependencies available.')
 json.dump(manifest, open('$MANIFEST', 'w'), indent=2)
+platform_deps = manifest.get('platform_deps', [])
+if platform_deps:
+    print(f'Platform dependencies (spec-prescribed): {\", \".join(platform_deps)}')
 " 2>&1) || SKIP_INFO="(manifest parse skipped)"
         echo ""
         echo "  $SKIP_INFO"

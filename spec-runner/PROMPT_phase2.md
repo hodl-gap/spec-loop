@@ -31,7 +31,10 @@ work that prior iterations already completed, or miss context about what failed.
      {"id": 2, "step": "Step 2", "description": "...", "status": "pending", "depends_on": [1]}
    ]
    ```
-3. Align tasks with tests — each task should have corresponding test(s)
+3. Align tasks with tests — each task should have corresponding test(s).
+   If a test has `"step": "end_to_end"` in the manifest, create a task for it that
+   `depends_on` ALL module-level tasks. This task wires modules together and runs
+   last — after every individual module passes its own tests.
 4. Start building task 1
 
 ### If this is a subsequent iteration:
@@ -48,6 +51,9 @@ work that prior iterations already completed, or miss context about what failed.
 - If the test passes: mark the task as "done" in tasks.json
 - If the test fails: read the error, try to fix. If stuck after 2 attempts, mark
   the task as "blocked" with the error message and move on
+- If `manifest.json` has a `platform_deps` array, `pip install` each one on the
+  first iteration. These are libraries the spec requires you to USE, not just
+  install — build with them as the spec intended. Tests will verify actual usage.
 
 ## How to update progress
 
@@ -75,7 +81,10 @@ After updating progress, check: are all **non-deferred** tasks "done"?
 - Read tasks.json and manifest.json
 - Skip tests marked `"deferred": true` in the manifest — their dependencies aren't
   available in this environment. Don't try to install missing infrastructure.
-- Run all non-deferred tests
+- Run all non-deferred tests — this includes `end_to_end` tests. All tests in the
+  manifest (code, build, integration, end_to_end) must pass for COMPLETE. An
+  end_to_end test that fails means modules aren't wired together yet, even if every
+  individual module test passes.
 - If all non-deferred tests pass: output `<promise>COMPLETE</promise>`
 - If any non-deferred test fails or any non-deferred task not done: just exit
   normally (the loop will start a new iteration with fresh context)

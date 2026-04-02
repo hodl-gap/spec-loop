@@ -127,6 +127,7 @@ starts from the spec's structure and forces every section to be accounted for.
    | **code** | Logic, math, data shapes, thresholds — plain Python can verify | `assert severity == "danger" when slot_diff > 25` |
    | **build** | Something must compile/start without errors | `npm run build exits 0`, `docker-compose up exits 0` |
    | **integration** | Requires live API/DB/network access + credentials | `Deribit API returns option chain for BTC` |
+   | **end_to_end** | Pipeline flows from input to output — modules are wired together | `Run pipeline with mock inputs, verify output files exist` |
    | **human** | Visual, UX, subjective — no automated check possible | `"Open browser, verify chart renders correctly"` |
    | **skip** | User decides not to test (must be explicit, with reason) | `"Nginx config — deployment-specific, tested in staging"` |
 
@@ -134,7 +135,31 @@ starts from the spec's structure and forces every section to be accounted for.
    dependencies. For `human` type, write a manual test instruction. For `skip`,
    document the reason.
 
-4. **Present the full coverage map:**
+4. **Check for end-to-end coverage.** If the spec has 3+ steps/sections where the
+   output of one feeds into the input of the next (a pipeline), the coverage map
+   needs at least one `end_to_end` row. This test runs the full pipeline — from
+   the first module's input to the last module's output — with mock or fixture data.
+   Without it, Phase 2 will build modules that pass unit tests individually but are
+   never wired together. The user gets a project where every piece works in isolation
+   and nothing works as a whole.
+
+   Two patterns for `end_to_end` tests:
+   - **CLI/app pipeline**: use `subprocess.run` to invoke the entry point, then check
+     output files/exit code.
+   - **Library pipeline**: import and call the top-level orchestration function
+     directly, then check the return value or output artifacts.
+
+5. **Identify platform requirements.** Some specs prescribe a specific library or
+   SDK — "use Braintrust Eval()", "build with FastAPI", "use SQLAlchemy ORM." These
+   constrain HOW to build, and the constraint itself is the acceptance criterion.
+   For each prescribed library, add a `code` test row that verifies the library is
+   imported and its key API is called in the project source. Without this test, the
+   builder will build a hand-rolled alternative that passes all other tests.
+
+   This is the one exception to "test outcomes, not implementation" — when the spec
+   makes the platform choice, verifying that choice IS an outcome test.
+
+6. **Present the full coverage map:**
 
 ```
 ## Spec Coverage Map
@@ -146,10 +171,12 @@ starts from the spec's structure and forces every section to be accounted for.
 | 3 | 3. Deribit API | integration | test_deribit_api.py — requires API key | COVERED (needs .env) |
 | 4 | 9. React Frontend | build | test_frontend_build.sh — npm build exits 0 | COVERED (smoke) |
 | 5 | 9.2 Vol Curve Editor | human | "Open browser, adjust ATM vol slider" | MANUAL |
-| 6 | 12.3 Nginx config | skip | Deployment-specific, tested in staging | NOT COVERED |
+| 6 | Full pipeline | end_to_end | test_pipeline_e2e.py — run pricing→IV→portfolio with fixture data, verify output | COVERED |
+| 7 | 9.2 Eval Platform | code | test_platform_braintrust.py — verify braintrust.Eval() used | COVERED (platform_dep) |
+| 8 | 12.3 Nginx config | skip | Deployment-specific, tested in staging | NOT COVERED |
 
 ### Gap Summary
-- 4 code tests, 1 integration test, 1 build test, 1 manual check, 1 skip
+- 4 code tests, 1 integration test, 1 build test, 1 end-to-end test, 1 platform dep test, 1 manual check, 1 skip
 - Integration tests require: DERIBIT_API_KEY in .env
 ```
 
@@ -266,6 +293,34 @@ cd frontend && npm run build > /tmp/build_output.txt 2>&1
 echo "PASS: frontend build succeeded ($(wc -l < /tmp/build_output.txt) lines output)"
 ```
 
+**Example — platform dependency check (Python):**
+```python
+#!/usr/bin/env python3
+"""Test: Spec requires braintrust — verify it is imported and Eval() is used."""
+import importlib, ast, sys, glob
+
+# 1. Library must be importable
+try:
+    importlib.import_module("braintrust")
+except ImportError:
+    print("FAIL: braintrust not installed (spec requires it)")
+    sys.exit(1)
+
+# 2. Project code must actually call the prescribed API
+found = False
+for fpath in glob.glob("src/**/*.py", recursive=True):
+    for node in ast.walk(ast.parse(open(fpath).read())):
+        if isinstance(node, ast.Call):
+            func = node.func
+            if (isinstance(func, ast.Name) and func.id == "Eval") or \
+               (isinstance(func, ast.Attribute) and func.attr == "Eval"):
+                found = True
+if not found:
+    print("FAIL: no Eval() call in src/ — spec requires braintrust.Eval()")
+    sys.exit(1)
+print("PASS: braintrust installed and Eval() used in source")
+```
+
 Keep tests simple. No test frameworks, no imports beyond stdlib + whatever the
 project itself uses.
 
@@ -310,6 +365,7 @@ Save a test manifest to `<project>/tests/manifest.json`:
 ```json
 {
   "spec": "SYMBOL_CHECKER_WORKFLOW.md",
+  "platform_deps": ["braintrust", "autoevals"],
   "deliverable": {
     "type": "web_app",
     "command": "cd src && python -m uvicorn main:app --port 8000",
@@ -344,6 +400,21 @@ Save a test manifest to `<project>/tests/manifest.json`:
       "step": "Step 6",
       "checks": ["Alembic migrations run, all tables exist"],
       "requires": ["postgresql", "alembic"]
+    },
+    {
+      "file": "test_pipeline_e2e.py",
+      "runner": "python",
+      "step": "end_to_end",
+      "checks": ["Pipeline runs from input to output, modules are wired"],
+      "requires": []
+    },
+    {
+      "file": "test_platform_braintrust.py",
+      "runner": "python",
+      "step": "Step 9.2",
+      "checks": ["braintrust installed", "Eval() used in source"],
+      "requires": ["braintrust"],
+      "platform_dep": true
     }
   ]
 }
@@ -386,7 +457,14 @@ means the autonomous loop loses its fresh-context advantage.
 
 - **Testing implementation instead of outcome.** "Function X is called with args Y"
   is an implementation test. "Output file contains records with severity field" is
-  an outcome test. The spec defines outcomes, not implementation.
+  an outcome test. The spec defines outcomes, not implementation. Exception: when
+  the spec prescribes a specific library ("use Braintrust Eval()"), verifying that
+  library is used IS an outcome test — the platform choice is the requirement.
+
+- **All unit tests, no pipeline test.** If the spec describes module A → B → C and
+  every test checks one module in isolation, Phase 2 will build islands that never
+  import each other. The coverage map needs at least one `end_to_end` row for any
+  multi-module pipeline.
 
 - **Assuming file paths.** The project structure doesn't exist yet. Use paths that
   are reasonable defaults, but ask the user. Hardcoded wrong paths = every test

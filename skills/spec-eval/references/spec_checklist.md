@@ -17,7 +17,9 @@ of anomaly history." The agent should choose the best implementation, not follow
 your architecture.
 
 Exception: when the spec IS an architecture doc (API contract, database schema),
-implementation details are the requirement. Use judgment.
+implementation details are the requirement. Also applies when the spec prescribes
+a specific library or SDK ("use Braintrust Eval()", "build with FastAPI") — these
+are platform requirements, and verifying their use is an outcome test. Use judgment.
 
 Source: GitHub Spec Kit (enforces spec.md vs plan.md separation), OpenSpec
 (specs exclude class names and framework choices).
